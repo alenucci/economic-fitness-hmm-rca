@@ -1,0 +1,8 @@
+.vscode
+
+__pycache__
+.ipynb_checkpoints
+
+gen_param
+results
+data

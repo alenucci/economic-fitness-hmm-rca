@@ -1,0 +1,4 @@
+{
+    "image": "intelpython/intelpython3_full",
+    "postCreateCommand": "conda install flake8 black -y"
+}
