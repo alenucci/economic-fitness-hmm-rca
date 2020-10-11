@@ -1,4 +1,8 @@
 {
     "image": "intelpython/intelpython3_full",
-    "postCreateCommand": "conda install flake8 black -y"
+    "postCreateCommand": "conda install flake8 black holoviews -y",
+    "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+    ]
 }
