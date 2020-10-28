@@ -27,7 +27,6 @@ class RcaHmm:
         self.zero_distr /= self.zero_distr.sum()
         self.zero_distr *= 1 - np.count_nonzero(series) / series.size
         self.init_distr = np.full(n_states, 1 / n_states)
-        self.lk = np.array([])
 
     @property
     def distr_params(self):
@@ -42,7 +41,7 @@ class RcaHmm:
         obs_prob = self.distr.pdf(series[:, np.newaxis])
         np.copyto(
             obs_prob,
-            self.zero_distr[np.newaxis, :, np.newaxis],
+            self.zero_distr[:, np.newaxis],
             where=~ser_msk[:, np.newaxis],
         )
 
@@ -50,7 +49,7 @@ class RcaHmm:
         beta = np.empty_like(alpha)
         c = np.empty((n_series, series_lenght))
 
-        alpha[..., 0] = self.init_distr[np.newaxis, :] * obs_prob[..., 0]
+        alpha[..., 0] = self.init_distr * obs_prob[..., 0]
         c[:, 0] = alpha[..., 0].sum(1)
         alpha[..., 0] /= c[:, np.newaxis, 0]
         for t in range(1, series_lenght):
@@ -77,7 +76,7 @@ class RcaHmm:
             )
             beta[..., -t - 1] /= c[:, np.newaxis, -t - 1]
 
-        gamma = alpha * beta * c[:, np.newaxis, :]
+        gamma = alpha * beta * c[:, np.newaxis]
         gamma /= gamma.sum(1, keepdims=True)
 
         return gamma.argmax(1)
@@ -90,15 +89,13 @@ class RcaHmm:
             log_obs_prob = np.log(self.distr.pdf(series[:, np.newaxis]))
         np.copyto(
             log_obs_prob,
-            np.log(self.zero_distr)[np.newaxis, :, np.newaxis],
+            np.log(self.zero_distr)[:, np.newaxis],
             where=~ser_msk[:, np.newaxis],
         )
 
         phi = np.empty((n_series, self.n_states, series_lenght))
         psi = np.empty((n_series, self.n_states, series_lenght))
-        phi[..., 0] = (
-            np.log10(self.init_distr)[np.newaxis, :] + log_obs_prob[..., 0]
-        )
+        phi[..., 0] = np.log10(self.init_distr) + log_obs_prob[..., 0]
         psi[..., 0] = 0
         log_matrix = np.log10(self.matrix)
         for t in range(1, series_lenght):
@@ -134,10 +131,11 @@ class RcaHmm:
         series = np.piecewise(series, [ser_msk], [-99, np.log])
         mix_hack = np.dstack(
             (
-                ~ser_msk[:, np.newaxis, np.newaxis, :],
-                ser_msk[:, np.newaxis, np.newaxis, :],
+                ~ser_msk[:, np.newaxis, np.newaxis],
+                ser_msk[:, np.newaxis, np.newaxis],
             )
         )
+        likelihood = []
 
         alpha_opt, _ = np.einsum_path(
             "ri,ij,rj->rj",
@@ -170,7 +168,7 @@ class RcaHmm:
                 where=ser_msk[:, np.newaxis],
             )
 
-            alpha[..., 0] = self.init_distr[np.newaxis, :] * obs_prob[..., 0]
+            alpha[..., 0] = self.init_distr * obs_prob[..., 0]
             c[:, 0] = alpha[..., 0].sum(1)
             alpha[..., 0] /= c[:, np.newaxis, 0]
             for t in range(1, series_lenght):
@@ -185,10 +183,10 @@ class RcaHmm:
                 c[:, t] = alpha[..., t].sum(1)
                 alpha[..., t] /= c[:, np.newaxis, t]
 
-            self.lk = np.append(self.lk, np.log10(c).sum() / n_elements)
+            likelihood = np.append(likelihood, np.log10(c).sum() / n_elements)
             try:
-                if np.abs(self.lk[-2] - self.lk[-1]) > 10 ** -eps:
-                    print(len(self.lk), self.lk[-1], end="\r")
+                if np.abs(likelihood[-2] - likelihood[-1]) > 10 ** -eps:
+                    print(len(likelihood), likelihood[-1], end="\r")
                 else:
                     order = np.argsort(self.distr.mean.flatten())
                     if (order != np.arange(self.n_states)).any():
@@ -201,8 +199,8 @@ class RcaHmm:
                         self.zero_distr = self.zero_distr[order]
                         self.init_distr = self.init_distr[order]
 
-                    print(f"Traninig completed in {len(self.lk)} iterations")
-                    print(f"Model likelihood : {self.lk[-1]}")
+                    print(f"Traninig completed in {len(likelihood)} iterations")
+                    print(f"Model likelihood : {likelihood[-1]}")
                     break
             except IndexError:
                 pass
@@ -240,7 +238,7 @@ class RcaHmm:
 
             gamma[..., 0].sum(axis=0, out=self.init_distr)
             self.init_distr /= self.init_distr.sum()
-            means = (gamma_mix[..., 0, :] * series[:, np.newaxis, :]).sum(
+            means = (gamma_mix[..., 0, :] * series[:, np.newaxis]).sum(
                 axis=(0, 2)
             )
             means /= gamma_mix[..., 0, :].sum(axis=(0, 2))
@@ -262,6 +260,7 @@ def import_rca_data(data_path):
     data = np.empty((n_countries, n_products, sample_lenght))
     for i, year in enumerate(range(first_year, first_year + sample_lenght)):
         data[..., i] = np.genfromtxt(f"{data_path}{year}/RCAmatrix{year}.txt")
+
 
     with open(
         f"{data_path}{first_year}/countries{first_year}.txt", "r"
@@ -292,6 +291,9 @@ def save_country_model(country, country_model, country_series):
         fmt="%d",
     )
 
+    # for param in ["matrix", "distr_params", "init_distr", "zero_distr"]:
+    # np.savetxt(f"{save_path}{param}.txt", country_model[param])
+
 
 if __name__ == "__main__":
     data, countries = import_rca_data("./data/")
@@ -306,6 +308,11 @@ if __name__ == "__main__":
         print(country_model.zero_distr)
         print(country_model.distr_params)
 
-        save_country_model(
-            country, country_model, country_model.states(country_series)
-        )
+        # print(
+        #     country_model[param]
+        #     for param in ["matrix", "zero_distr", "distr_params"]
+        # )
+
+        # save_country_model(
+        #     country, country_model, country_model.states(country_series)
+        # )
