@@ -100,13 +100,11 @@ class RcaHmm:
         log_matrix = np.log10(self.matrix)
         for t in range(1, series_lenght):
             phi[..., t] = np.amax(
-                phi[..., t - 1, np.newaxis] + log_matrix[np.newaxis, ...],
-                axis=1,
+                phi[..., t - 1, np.newaxis] + log_matrix, axis=1,
             )
             phi[..., t] += log_obs_prob[..., t]
             psi[..., t] = np.argmax(
-                phi[..., t - 1, np.newaxis] + log_matrix[np.newaxis, ...],
-                axis=1,
+                phi[..., t - 1, np.newaxis] + log_matrix, axis=1,
             )
 
         states = np.empty((n_series, series_lenght), dtype=int)
@@ -119,7 +117,6 @@ class RcaHmm:
 
     def baum_welch(self, series, eps=5):
         n_series, series_lenght = series.shape
-        n_elements = n_series * series_lenght
 
         obs_prob = np.empty((n_series, self.n_states, series_lenght))
         alpha, beta = np.empty_like(obs_prob), np.empty_like(obs_prob)
@@ -164,7 +161,7 @@ class RcaHmm:
             obs_prob[...] = self.distr.pdf(series[:, np.newaxis])
             np.copyto(
                 obs_prob,
-                self.zero_distr[np.newaxis, :, np.newaxis],
+                self.zero_distr[:, np.newaxis],
                 where=ser_msk[:, np.newaxis],
             )
 
@@ -183,7 +180,7 @@ class RcaHmm:
                 c[:, t] = alpha[..., t].sum(1)
                 alpha[..., t] /= c[:, np.newaxis, t]
 
-            likelihood = np.append(likelihood, np.log10(c).sum() / n_elements)
+            likelihood = np.append(likelihood, np.log10(c).sum() / series.size)
             try:
                 if np.abs(likelihood[-2] - likelihood[-1]) > 10 ** -eps:
                     print(len(likelihood), likelihood[-1], end="\r")
@@ -199,8 +196,10 @@ class RcaHmm:
                         self.zero_distr = self.zero_distr[order]
                         self.init_distr = self.init_distr[order]
 
-                    print(f"Traninig completed in {len(likelihood)} iterations")
-                    print(f"Model likelihood : {likelihood[-1]}")
+                    print(
+                        f"Traninig completed in {len(likelihood)} iterations"
+                        f"Model likelihood : {likelihood[-1]}"
+                    )
                     break
             except IndexError:
                 pass
@@ -260,7 +259,6 @@ def import_rca_data(data_path):
     data = np.empty((n_countries, n_products, sample_lenght))
     for i, year in enumerate(range(first_year, first_year + sample_lenght)):
         data[..., i] = np.genfromtxt(f"{data_path}{year}/RCAmatrix{year}.txt")
-
 
     with open(
         f"{data_path}{first_year}/countries{first_year}.txt", "r"
