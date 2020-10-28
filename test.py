@@ -1,5 +1,6 @@
 # %%
 import cProfile
+import line_profiler
 
 import holoviews as hv
 import numpy as np
@@ -10,18 +11,18 @@ from guess import RcaHmm
 hv.extension("bokeh", "matplotlib")
 opts.defaults(opts.Distribution(width=650))
 
-# %%
-series = np.genfromtxt("gen_param/values.txt")
-gen_states = np.genfromtxt("gen_param/states.txt")
+series = np.genfromtxt("data/1995/RCAmatrix1995.txt")
 
 model = RcaHmm(series, 4)
 hv.Distribution(np.log(series[series.nonzero()]))
 
 # %%
-model.baum_welch(series, 7)
+model.baum_welch(series, 6)
 hv.Curve(model.lk, "iterations", "likelihood")
 
 # %%
+gen_states = np.genfromtxt("gen_param/states.txt")
+
 right_states = 100 * np.count_nonzero(
     gen_states == model.viterbi(series)) / series.size
 right_viterbi = 100 * np.count_nonzero(
@@ -48,5 +49,9 @@ layout.opts(opts.Scatter(size=7, tools=["hover"]), opts.Curve(color="green"))
 
 # %%
 cProfile.run("model.baum_welch(series, 5)", sort="cumtime")
+
+# %%
+lp = line_profiler.LineProfiler(model.baum_welch)
+lp.run("model.baum_welch(series, 3)").print_stats()
 
 # %%

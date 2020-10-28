@@ -3,6 +3,24 @@ import os
 import numpy as np
 from scipy.stats import norm
 
+from numba import njit
+
+
+@njit()
+def calc_alpha(alpha, matrix, obs_prob, c):
+    for t in range(1, alpha.shape[2]):
+        alpha[..., t] = alpha[..., t - 1] @ matrix
+        alpha[..., t] *= obs_prob[..., t]
+        c[:, t] = alpha[..., t].sum(1)
+        alpha[..., t] /= np.expand_dims(c[:, t], 0)
+
+
+@njit()
+def calc_beta(beta, matrix, obs_prob, c):
+    for t in range(-1, -beta.shape[2], -1):
+        beta[..., t - 1] = beta[..., t] * obs_prob[..., t] @ matrix.T
+        beta[..., t - 1] /= np.expand_dims(c[:, t - 1], 0)
+
 
 class RcaHmm:
     """
@@ -134,20 +152,6 @@ class RcaHmm:
         )
         likelihood = []
 
-        alpha_opt, _ = np.einsum_path(
-            "ri,ij,rj->rj",
-            alpha[..., 0],
-            self.matrix,
-            obs_prob[..., 0],
-            optimize="optimal",
-        )
-        beta_opt, _ = np.einsum_path(
-            "ij,rj,rj->ri",
-            self.matrix,
-            beta[..., 0],
-            obs_prob[..., 0],
-            optimize="optimal",
-        )
         matrix_opt, _ = np.einsum_path(
             "rit,ij,rjt,rjt->ij",
             alpha[..., :-1],
@@ -168,17 +172,8 @@ class RcaHmm:
             alpha[..., 0] = self.init_distr * obs_prob[..., 0]
             c[:, 0] = alpha[..., 0].sum(1)
             alpha[..., 0] /= c[:, np.newaxis, 0]
-            for t in range(1, series_lenght):
-                np.einsum(
-                    "ri,ij,rj->rj",
-                    alpha[..., t - 1],
-                    self.matrix,
-                    obs_prob[..., t],
-                    out=alpha[..., t],
-                    optimize=alpha_opt,
-                )
-                c[:, t] = alpha[..., t].sum(1)
-                alpha[..., t] /= c[:, np.newaxis, t]
+
+            calc_alpha(alpha, self.matrix, obs_prob, c)
 
             likelihood = np.append(likelihood, np.log10(c).sum() / series.size)
             try:
@@ -197,24 +192,17 @@ class RcaHmm:
                         self.init_distr = self.init_distr[order]
 
                     print(
-                        f"Traninig completed in {len(likelihood)} iterations"
-                        f"Model likelihood : {likelihood[-1]}"
+                        f"Traninig completed in {len(likelihood)} iterations",
+                        f"Model likelihood : {likelihood[-1]}",
+                        sep="\n",
                     )
                     break
             except IndexError:
                 pass
 
             beta[..., -1] = 1 / c[:, np.newaxis, -1]
-            for t in range(-1, -series_lenght, -1):
-                np.einsum(
-                    "ij,rj,rj->ri",
-                    self.matrix,
-                    beta[..., t],
-                    obs_prob[..., t],
-                    out=beta[..., t - 1],
-                    optimize=beta_opt,
-                )
-                beta[..., t - 1] /= c[:, np.newaxis, t - 1]
+
+            calc_beta(beta, self.matrix, obs_prob, c)
 
             np.einsum(
                 "rit,ij,rjt,rjt->ij",
