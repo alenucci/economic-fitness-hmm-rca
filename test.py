@@ -5,7 +5,7 @@ import holoviews as hv
 import numpy as np
 from holoviews import opts
 
-from guess_ import RcaHmm
+from guess import RcaHmm
 
 hv.extension("bokeh", "matplotlib")
 opts.defaults(opts.Distribution(width=650))
