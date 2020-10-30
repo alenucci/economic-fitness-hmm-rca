@@ -3,30 +3,13 @@ import os
 import numpy as np
 from scipy.stats import norm
 
-from numba import njit
 from numpy import newaxis
-
-
-@njit()
-def calc_alpha(alpha, matrix, obs_prob, c):
-    for t in range(1, alpha.shape[2]):
-        alpha[..., t] = alpha[..., t - 1] @ matrix
-        alpha[..., t] *= obs_prob[..., t]
-        c[:, t] = alpha[..., t].sum(1)
-        alpha[..., t] /= np.expand_dims(c[:, t], 0)
-
-
-@njit()
-def calc_beta(beta, matrix, obs_prob, c):
-    for t in range(-1, -beta.shape[2], -1):
-        beta[..., t - 1] = (beta[..., t] * obs_prob[..., t]) @ matrix
-        beta[..., t - 1] /= np.expand_dims(c[:, t - 1], 0)
 
 
 class RcaHmm:
     """
     An hidden Markov model to determine the country-product martix in
-    the context of Economic Fitness model
+    Economic Fitness model
     """
 
     def __init__(self, series, n_states):
@@ -53,7 +36,7 @@ class RcaHmm:
     def states(self, series):
         n_series, series_lenght = series.shape
         ser_msk = series != 0
-        series = np.piecewise(series, [ser_msk, ~ser_msk], [np.log, -99])
+        series = np.piecewise(series, [ser_msk], [np.log, -99])
         obs_prob = self.distr.pdf(series[:, newaxis])
         np.copyto(
             obs_prob, self.zero_distr[:, newaxis], where=~ser_msk[:, newaxis],
@@ -67,27 +50,16 @@ class RcaHmm:
         c[:, 0] = alpha[..., 0].sum(1)
         alpha[..., 0] /= c[:, newaxis, 0]
         for t in range(1, series_lenght):
-            np.einsum(
-                "ri,ij,rj->rj",
-                alpha[..., t - 1],
-                self.matrix,
-                obs_prob[..., t],
-                out=alpha[..., t],
-                optimize=True,
-            )
+            alpha[..., t] = alpha[..., t - 1] @ self.matrix
+            alpha[..., t] *= obs_prob[..., t]
             c[:, t] = alpha[..., t].sum(1)
             alpha[..., t] /= c[:, newaxis, t]
 
         beta[..., -1] = 1 / c[:, newaxis, -1]
         for t in range(1, series_lenght):
-            np.einsum(
-                "ij,rj,rj->ri",
-                self.matrix,
-                beta[..., -t],
-                obs_prob[..., -t],
-                out=beta[..., -t - 1],
-                optimize=True,
-            )
+            beta[..., -t - 1] = (
+                beta[..., -t] * obs_prob[..., -t]
+            ) @ self.matrix.T
             beta[..., -t - 1] /= c[:, newaxis, -t - 1]
 
         gamma = alpha * beta * c[:, newaxis]
@@ -98,7 +70,7 @@ class RcaHmm:
     def viterbi(self, series):
         n_series, series_lenght = series.shape
         ser_msk = series != 0
-        series = np.piecewise(series, [ser_msk, ~ser_msk], [np.log, -99])
+        series = np.piecewise(series, [ser_msk], [np.log, -99])
         with np.errstate(divide="ignore"):
             log_obs_prob = np.log(self.distr.pdf(series[:, newaxis]))
         np.copyto(
@@ -166,7 +138,6 @@ class RcaHmm:
             c[:, 0] = alpha[..., 0].sum(1)
             alpha[..., 0] /= c[:, newaxis, 0]
 
-            # calc_alpha(alpha, self.matrix, obs_prob, c)
             for t in range(1, series_lenght):
                 alpha[..., t] = alpha[..., t - 1] @ self.matrix
                 alpha[..., t] *= obs_prob[..., t]
@@ -200,7 +171,6 @@ class RcaHmm:
 
             beta[..., -1] = 1 / c[:, newaxis, -1]
 
-            # calc_beta(beta, self.matrix, obs_prob, c)
             for t in range(1, series_lenght):
                 beta[..., -t - 1] = (
                     beta[..., -t] * obs_prob[..., -t]
@@ -294,14 +264,16 @@ if __name__ == "__main__":
         country_model = RcaHmm(country_series, 4)
         country_model.baum_welch(country_series)
 
-        print(country_model.matrix)
-        print(country_model.zero_distr)
-        print(country_model.distr_params)
+        # print(country_model.matrix)
+        # print(country_model.zero_distr)
+        # print(country_model.distr_params)
 
-        # print(
-        #     country_model[param]
-        #     for param in ["matrix", "zero_distr", "distr_params"]
-        # )
+        print(
+            *(
+                country_model[param]
+                for param in ["matrix", "zero_distr", "distr_params"]
+            )
+        )
 
         # save_country_model(
         #     country, country_model, country_model.states(country_series)
